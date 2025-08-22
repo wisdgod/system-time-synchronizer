@@ -50,14 +50,18 @@ jobs:
         if: runner.os != 'macOS'
         run: |
           V="2.40.4"
+          BASE_URL="https://github.com/rui314/mold/releases/download/v$V/mold-$V"
+          
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             if [ "$(whoami)" = root ]; then SUDO=; else SUDO=sudo; fi
+            # Linux 保持使用 wget（与官方示例一致）
             wget -O- --timeout=10 --waitretry=3 --retry-connrefused --progress=dot:mega \
-              https://github.com/rui314/mold/releases/download/v$V/mold-$V-$(uname -m)-linux.tar.gz | \
+              "$BASE_URL-$(uname -m)-linux.tar.gz" | \
               $SUDO tar -C /usr/local --strip-components=1 --no-overwrite-dir -xzf -
           else
-            wget -O mold.zip --timeout=10 --waitretry=3 --retry-connrefused \
-              https://github.com/rui314/mold/releases/download/v$V/mold-$V-x86_64-windows.zip
+            # Windows 使用 curl 的等效参数
+            curl -LfSs --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 3 \
+              -o mold.zip "$BASE_URL-x86_64-windows.zip"
             unzip -q mold.zip -d /usr/local
             echo "/usr/local/bin" >> $GITHUB_PATH
           fi
