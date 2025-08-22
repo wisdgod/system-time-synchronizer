@@ -63,7 +63,12 @@ jobs:
 
       - name: 构建二进制文件
         run: |
-          RUSTFLAGS="-C link-arg=-s -C link-arg=-fuse-ld=mold" cargo build --release --target ${{ matrix.target }} --bin system-time-synchronizer
+          if command -v mold >/dev/null 2>&1; then
+            LINKER=mold
+          else
+            LINKER=lld
+          fi
+          RUSTFLAGS="-C link-arg=-s -C link-arg=-fuse-ld=$LINKER" cargo build --release --target ${{ matrix.target }} --bin system-time-synchronizer
         shell: bash
 
       - name: 准备发布文件
