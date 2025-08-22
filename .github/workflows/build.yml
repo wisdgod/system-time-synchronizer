@@ -81,15 +81,15 @@ jobs:
         run: |
           # 检测可用的链接器
           if command -v mold >/dev/null 2>&1; then
-            LINKER=mold
+            LINKER_ARG="-C link-arg=-fuse-ld=mold"
             echo "✓ 使用 mold 链接器"
           else
-            LINKER=lld
-            echo "✓ 使用 lld 链接器"
+            LINKER_ARG=""
+            echo "✓ 使用默认链接器"
           fi
           
           # 构建项目
-          RUSTFLAGS="-C link-arg=-s -C link-arg=-fuse-ld=$LINKER" \
+          RUSTFLAGS="-C link-arg=-s $LINKER_ARG" \
             cargo build --release --target ${{ matrix.target }} --bin system-time-synchronizer
         shell: bash
 
