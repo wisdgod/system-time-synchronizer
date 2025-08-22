@@ -47,9 +47,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 安装 mold
-        uses: rui314/setup-mold@v1
-        with:
-          make-default: false
+        if: runner.os != 'macOS'
+        run: |
+          V="2.40.4"
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            if [ "$(whoami)" = root ]; then SUDO=; else SUDO=sudo; fi
+            wget -O- --timeout=10 --waitretry=3 --retry-connrefused --progress=dot:mega \
+              https://github.com/rui314/mold/releases/download/v$V/mold-$V-$(uname -m)-linux.tar.gz | \
+              $SUDO tar -C /usr/local --strip-components=1 --no-overwrite-dir -xzf -
+          else
+            wget -O mold.zip --timeout=10 --waitretry=3 --retry-connrefused \
+              https://github.com/rui314/mold/releases/download/v$V/mold-$V-x86_64-windows.zip
+            unzip -q mold.zip -d /usr/local
+            echo "/usr/local/bin" >> $GITHUB_PATH
+          fi
+        shell: bash
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@nightly
@@ -63,12 +75,18 @@ jobs:
 
       - name: 构建二进制文件
         run: |
+          # 检测可用的链接器
           if command -v mold >/dev/null 2>&1; then
             LINKER=mold
+            echo "✓ 使用 mold 链接器"
           else
             LINKER=lld
+            echo "✓ 使用 lld 链接器"
           fi
-          RUSTFLAGS="-C link-arg=-s -C link-arg=-fuse-ld=$LINKER" cargo build --release --target ${{ matrix.target }} --bin system-time-synchronizer
+          
+          # 构建项目
+          RUSTFLAGS="-C link-arg=-s -C link-arg=-fuse-ld=$LINKER" \
+            cargo build --release --target ${{ matrix.target }} --bin system-time-synchronizer
         shell: bash
 
       - name: 准备发布文件
@@ -94,9 +112,6 @@ jobs:
             echo "✗ 找不到文件: $SOURCE"
             exit 1
           fi
-          
-          # 列出生成的文件
-          ls -la release/
         shell: bash
 
       - name: 压缩二进制文件
