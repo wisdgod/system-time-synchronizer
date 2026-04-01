@@ -1,3 +1,0 @@
-[unstable]
-profile-rustflags = true
-trim-paths = true

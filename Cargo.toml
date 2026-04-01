@@ -1,6 +1,6 @@
 [package]
 name = "system-time-synchronizer"
-version = "0.0.2"
+version = "0.1.0"
 edition = "2024"
 
 [[bin]]
@@ -8,13 +8,14 @@ name = "system-time-synchronizer"
 path = "src/main.rs"
 
 [dependencies]
-chrono = { version = "0.4", default-features = false }
+jiff = { version = "0.2", default-features = false }
 
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.30", features = ["time", "user"] }
+[target.'cfg(unix)'.dependencies.nix]
+version = "0.31"
+features = ["time", "user"]
 
 [target.'cfg(windows)'.dependencies.windows-sys]
-version = "0.60"
+version = "0.61"
 features = [
     "Win32_System_SystemInformation",
     "Win32_Foundation",
@@ -36,5 +37,3 @@ codegen-units = 1
 panic = 'abort'
 strip = true
 opt-level = 3
-trim-paths = "all"
-rustflags = ["-Cdebuginfo=0", "-Zthreads=8"]
