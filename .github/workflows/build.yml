@@ -54,25 +54,12 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 安装 mold
-        if: runner.os != 'macOS'
+      - name: 安装 lld
+        if: runner.os == 'Linux' && !contains(matrix.target, 'android')
         run: |
-          V="2.40.4"
-          BASE_URL="https://github.com/rui314/mold/releases/download/v$V/mold-$V"
-          
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            if [ "$(whoami)" = root ]; then SUDO=; else SUDO=sudo; fi
-            # Linux 保持使用 wget（与官方示例一致）
-            wget -O- --timeout=10 --waitretry=3 --retry-connrefused --progress=dot:mega \
-              "$BASE_URL-$(uname -m)-linux.tar.gz" | \
-              $SUDO tar -C /usr/local --strip-components=1 --no-overwrite-dir -xzf -
-          else
-            # Windows 使用 curl 的等效参数
-            curl -LfSs --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 3 \
-              -o mold.zip "$BASE_URL-x86_64-windows.zip"
-            unzip -q mold.zip -d /usr/local
-            echo "/usr/local/bin" >> $GITHUB_PATH
-          fi
+          if [ "$(whoami)" = root ]; then SUDO=; else SUDO=sudo; fi
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y -qq lld >/dev/null
         shell: bash
 
       - name: 安装 Android NDK
@@ -88,39 +75,36 @@ jobs:
         if: contains(matrix.target, 'android')
         run: |
           NDK_PATH="${{ steps.setup-ndk.outputs.ndk-path }}"
-          
+
           mkdir -p .cargo
           CARGO_CONFIG=".cargo/config.toml"
-          
-          # 准备配置文件
+
           if [ -f "$CARGO_CONFIG" ]; then
             echo "找到现有的 .cargo/config.toml，将追加配置"
           else
             echo "创建新的 .cargo/config.toml 文件"
             touch "$CARGO_CONFIG"
           fi
-          
-          # 为 aarch64-linux-android 添加配置
+
           if [[ "${{ matrix.target }}" == "aarch64-linux-android" ]]; then
             cat >> "$CARGO_CONFIG" << EOF
-          
+
           [target.aarch64-linux-android]
           linker = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ env.ANDROID_API_LEVEL }}-clang"
           ar = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-          
+
           [env]
           CC_aarch64_linux_android = { value = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ env.ANDROID_API_LEVEL }}-clang", force = true, relative = false }
           AR_aarch64_linux_android = { value = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar", force = true, relative = false }
           EOF
-          
-          # 为 x86_64-linux-android 添加配置
+
           elif [[ "${{ matrix.target }}" == "x86_64-linux-android" ]]; then
             cat >> "$CARGO_CONFIG" << EOF
-          
+
           [target.x86_64-linux-android]
           linker = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android${{ env.ANDROID_API_LEVEL }}-clang"
           ar = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-          
+
           [env]
           CC_x86_64_linux_android = { value = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android${{ env.ANDROID_API_LEVEL }}-clang", force = true, relative = false }
           AR_x86_64_linux_android = { value = "${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar", force = true, relative = false }
@@ -140,17 +124,21 @@ jobs:
 
       - name: 构建二进制文件
         run: |
-          # 检测可用的链接器
-          if command -v mold >/dev/null 2>&1; then
-            LINKER_ARG="-C link-arg=-fuse-ld=mold"
-            echo "✓ 使用 mold 链接器"
+          RUSTFLAGS="-C strip=symbols"
+
+          # Linux 非 Android：使用 lld
+          if [[ "${{ runner.os }}" == "Linux" ]] && ! [[ "${{ matrix.target }}" == *"android"* ]]; then
+            if command -v ld.lld >/dev/null 2>&1; then
+              RUSTFLAGS="$RUSTFLAGS -C link-arg=-fuse-ld=lld"
+              echo "✓ 使用 lld 链接器"
+            else
+              echo "✓ 使用默认链接器"
+            fi
           else
-            LINKER_ARG=""
-            echo "✓ 使用默认链接器"
+            echo "✓ 使用平台默认链接器"
           fi
-          
-          # 构建项目
-          RUSTFLAGS="-C link-arg=-s $LINKER_ARG" \
+
+          RUSTFLAGS="$RUSTFLAGS" \
             cargo build --release --target ${{ matrix.target }} --bin system-time-synchronizer
         shell: bash
 
@@ -158,18 +146,16 @@ jobs:
         run: |
           mkdir -p release
           BIN_NAME="system-time-synchronizer"
-          
-          # 根据平台设置文件扩展名
+
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             EXT=".exe"
           else
             EXT=""
           fi
-          
-          # 复制并不重命名二进制文件，就一个文件没有必要
+
           SOURCE="target/${{ matrix.target }}/release/${BIN_NAME}${EXT}"
           DEST="release/${BIN_NAME}${EXT}"
-          
+
           if [[ -f "$SOURCE" ]]; then
             cp "$SOURCE" "$DEST"
             echo "✓ 已复制: $DEST"
@@ -215,15 +201,12 @@ jobs:
       - name: 准备发布文件
         run: |
           mkdir -p release
-          
-          # 移动所有文件到 release 目录
+
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
-          
-          # 生成校验和
+
           cd release
           sha256sum * > SHA256SUMS.txt
-          
-          # 显示所有文件
+
           echo "📦 准备发布的文件："
           ls -lah
 
@@ -240,8 +223,7 @@ jobs:
         id: release_body
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          
-          # 开始构建 Release Body
+
           {
             echo "body<<EOF"
             echo "## 📦 下载"
